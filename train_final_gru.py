@@ -2,6 +2,7 @@
 Train and store a model using K-fold hyperparameter search
 """
 
+import json
 from pathlib import Path
 
 import joblib
@@ -16,6 +17,7 @@ from src.utils import file_to_sequences, make_label_array, make_binary_labels, s
 ROOT = Path(__file__).resolve().parent
 MODEL_FILE_NAME = "gru_final.pth"
 SCALER_FILE_NAME = "scaler.pkl"
+PARAMS_FILE_NAME = "best_params.json"
 train_file_path = ROOT / "data" / "ae.train"
 save_dir = ROOT / "saved_models"
 
@@ -70,15 +72,15 @@ if __name__ == "__main__":
         "batch_size": [8, 16, 32, 64],
         "epoch_patience": [5], 
     }
-
+ 
     best_params = hyperparameter_search_gru(param_grid, train_seqs, train_labels, N_FOLDS, device)
     print("Best found hyperparameters:", best_params)
-
+ 
     # === FINAL TRAINING ===
     # Only initialze the model with the best_parameters
     input_size = train_seqs.size(2)
     n_labels = len(torch.unique(train_labels))
-
+ 
     gru_model = GRUClassifier(
         input_size=input_size,
         hidden_size=best_params["hidden_size"],
@@ -87,7 +89,7 @@ if __name__ == "__main__":
         dropout_prob=best_params["dropout_prob"],
         device=device,
     ).to(device)
-
+ 
     # Train the final model on all training sequences without validation
     # Note that it will only track the training loss
     best_model, _, _ = train_gru_model(
@@ -104,15 +106,31 @@ if __name__ == "__main__":
         use_writer=True,
         log_dir="runs/final_training",
     )
-
-    # === SAVE MODEL AND SCALER ===
-    # Save both so they can be loaded together for evaluation and deployment
+ 
+    # SAVE MODEL, SCALER, AND METADATA 
+    # Save all three so they can be used for evaluation and deployment
     save_dir.mkdir(exist_ok=True)
 
     save_path = save_dir / MODEL_FILE_NAME
     torch.save(best_model, save_path)
     print(f"Model saved to {save_path}.")
-
+ 
     scaler_path = save_dir / SCALER_FILE_NAME
     joblib.dump(scaler, scaler_path)
     print(f"Scaler saved to {scaler_path}.")
+    
+    # save best hyperparameters as JSON for the API 
+    params_path = save_dir / PARAMS_FILE_NAME
+    # Convert numpy values to plain Python types for JSON
+    serializable_params = {
+        k: v.item() if hasattr(v, "item") else v
+        for k, v in best_params.items()
+    }
+    # derived info the API will need
+    serializable_params["n_classes"] = int(n_labels)
+    serializable_params["input_size"] = int(input_size)
+    serializable_params["authenticated_speakers"] = [int(s) for s in AUTHENTICATED_SPEAKERS]
+    with open(params_path, "w") as f:
+        json.dump(serializable_params, f, indent=2)
+    print(f"Best hyperparameters saved to {params_path}.")
+
