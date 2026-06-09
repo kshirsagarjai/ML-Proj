@@ -6,3 +6,7 @@ seaborn
 joblib
 tqdm
 tensorboard
+fastapi
+uvicorn
+joblib
+pydantic
